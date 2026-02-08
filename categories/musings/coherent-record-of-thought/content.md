@@ -1,6 +1,6 @@
 ---
 title: Coherent Record of Thought
-date: 2026-02-08
+date: 2026-02-07
 description: A chance for manifold musings to manifest
 category: Musings
 showContents: false
