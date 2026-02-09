@@ -2,7 +2,6 @@
 title: '"That is just blogslop, your honor"'
 date: 2026-02-08
 description: How does one balance pretense with presence and sincerity?
-category: Musings
 showContents: false
 ---
 

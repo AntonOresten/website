@@ -89,7 +89,7 @@ body {
 body::before,
 body::after {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: -2;
@@ -99,15 +99,15 @@ body::after {
 body::before {
   opacity: 1;
   background:
-    radial-gradient(1400px 700px at 10% -15%, rgba(193, 176, 142, 0.09), transparent 50%),
-    linear-gradient(180deg, #f4f2ea 0%, #f2f0e8 22rem, #f2f0e8 100%);
+    radial-gradient(1700px 900px at 10% -18%, rgba(193, 176, 142, 0.05), transparent 62%),
+    linear-gradient(180deg, #f3f1e9 0%, #f2f0e8 44rem, #f2f0e8 100%);
 }
 
 body::after {
   opacity: 0;
   background:
-    radial-gradient(1400px 700px at 10% -15%, rgba(144, 116, 82, 0.09), transparent 50%),
-    linear-gradient(180deg, #1c1c1c 0%, #151515 22rem, #151515 100%);
+    radial-gradient(1700px 900px at 10% -18%, rgba(144, 116, 82, 0.05), transparent 62%),
+    linear-gradient(180deg, #1a1a1a 0%, #151515 44rem, #151515 100%);
 }
 
 [data-theme="dark"] body::before {

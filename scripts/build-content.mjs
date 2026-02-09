@@ -1,16 +1,24 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import MarkdownIt from 'markdown-it';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, '..');
 const buildRoot = path.join(root, 'build');
 const categoriesRoot = path.join(root, 'categories');
+const categoriesConfigPath = path.join(root, 'categories.config.json');
 const contentDir = path.join(buildRoot, 'content');
 const outputJson = path.join(contentDir, 'posts.json');
 const rssPath = path.join(buildRoot, 'rss.xml');
 const configPath = path.join(root, 'site.config.json');
+
+const md = new MarkdownIt({
+  html: false,
+  linkify: true,
+  typographer: false,
+});
 
 function tempPathFor(filePath) {
   const dir = path.dirname(filePath);
@@ -42,6 +50,35 @@ function toRfc822Date(isoDate) {
 async function readJson(filePath) {
   const raw = await fs.readFile(filePath, 'utf8');
   return JSON.parse(raw);
+}
+
+async function readCategoriesConfig() {
+  const raw = await readJson(categoriesConfigPath);
+  const items = Array.isArray(raw.categories) ? raw.categories : null;
+  if (!items || !items.length) {
+    throw new Error('categories.config.json must include a non-empty "categories" array.');
+  }
+
+  const seen = new Set();
+  return items.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`Invalid category entry at index ${index} in categories.config.json`);
+    }
+
+    const slug = requireString(entry.slug, `categories[${index}].slug`, categoriesConfigPath);
+    const name = requireString(entry.name, `categories[${index}].name`, categoriesConfigPath);
+
+    if (seen.has(slug)) {
+      throw new Error(`Duplicate category slug "${slug}" in categories.config.json`);
+    }
+    seen.add(slug);
+
+    return {
+      slug,
+      name,
+      order: index,
+    };
+  });
 }
 
 function requireString(value, fieldName, filePath) {
@@ -134,98 +171,17 @@ function parseFrontMatter(content, filePath) {
   };
 }
 
-function renderInline(raw, depth = 0) {
-  if (depth > 4) return escapeHtml(raw);
-
-  let source = String(raw ?? '');
-  const codeTokens = [];
-  const linkTokens = [];
-
-  source = source.replace(/(`+)([^`]|[^][\s\S]*?[^`])\1/g, (_m, ticks, code) => {
-    const token = `@@CODE_${codeTokens.length}@@`;
-    codeTokens.push(`<code>${escapeHtml(code)}</code>`);
-    return token;
-  });
-
-  source = source.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, href) => {
-    const token = `@@LINK_${linkTokens.length}@@`;
-    linkTokens.push(`<a href="${escapeAttr(href)}">${renderInline(label, depth + 1)}</a>`);
-    return token;
-  });
-
-  source = escapeHtml(source);
-
-  source = source.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, '<strong>$1</strong>');
-  source = source.replace(/__(?=\S)([\s\S]*?\S)__/g, '<strong>$1</strong>');
-  source = source.replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
-
-  source = source.replace(/(?<!\*)\*(?!\s)([^*]*?\S)\*(?!\*)/g, '<em>$1</em>');
-  source = source.replace(/(?<!_)_(?!\s)([^_]*?\S)_(?!_)/g, '<em>$1</em>');
-
-  source = source.replace(/(https?:\/\/[^\s<]+)/g, (match) => `<a href="${escapeAttr(match)}">${match}</a>`);
-
-  source = source.replace(/@@LINK_(\d+)@@/g, (_m, index) => linkTokens[Number(index)] || '');
-  source = source.replace(/@@CODE_(\d+)@@/g, (_m, index) => codeTokens[Number(index)] || '');
-
-  return source;
-}
-
 function normalizeChapterTitle(title) {
   return String(title || '').replace(/^\d+\.\s+/, '').trim();
 }
 
-function isRuleLine(line) {
-  const trimmed = line.trim();
-  return /^(\*\s*){3,}$/.test(trimmed) || /^(-\s*){3,}$/.test(trimmed) || /^(_\s*){3,}$/.test(trimmed);
+function renderInlineMarkdown(text) {
+  return md.renderInline(String(text || ''));
 }
 
-function parseFenceStart(line) {
-  const match = line.trim().match(/^(`{3,}|~{3,})([^`]*)$/);
-  if (!match) return null;
-  return {
-    marker: match[1][0],
-    length: match[1].length,
-    info: match[2].trim().toLowerCase(),
-  };
-}
-
-function isFenceEnd(line, marker, length) {
-  const trimmed = line.trim();
-  const re = marker === '`' ? /^`{3,}\s*$/ : /^~{3,}\s*$/;
-  if (!re.test(trimmed)) return false;
-  let count = 0;
-  while (count < trimmed.length && trimmed[count] === marker) count += 1;
-  return count >= length;
-}
-
-function parseTableRow(line) {
-  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
-  return trimmed.split('|').map((cell) => cell.trim());
-}
-
-function isTableSeparator(line) {
-  const cells = parseTableRow(line);
-  if (!cells.length) return false;
-  return cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
-}
-
-function parseAlignment(cell) {
-  const compact = cell.replace(/\s+/g, '');
-  const left = compact.startsWith(':');
-  const right = compact.endsWith(':');
-  if (left && right) return 'center';
-  if (right) return 'right';
-  if (left) return 'left';
-  return null;
-}
-
-function parseMarkdown(markdown) {
-  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
-  const introBlocks = [];
-  const chapters = [];
+function buildMarkdownStructure(source) {
+  const tokens = md.parse(source.replace(/\r\n/g, '\n'), {});
   const usedIds = new Set();
-  let activeChapter = null;
-  let subsectionStack = [];
 
   function uniqueId(prefix, text, fallback) {
     const base = `${prefix}-${slugify(text || '') || fallback}`;
@@ -239,57 +195,70 @@ function parseMarkdown(markdown) {
     return id;
   }
 
-  function pushBlock(block) {
-    if (activeChapter) {
-      activeChapter.blocks.push(block);
-    } else {
-      introBlocks.push(block);
-    }
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token.type !== 'heading_open') continue;
+
+    const inline = tokens[i + 1];
+    if (!inline || inline.type !== 'inline') continue;
+
+    const level = Number(token.tag.slice(1));
+    const headingText = normalizeChapterTitle(inline.content || '');
+    const id = uniqueId(level === 2 ? 'chapter' : 'section', headingText || inline.content, String(i + 1));
+    token.attrSet('id', id);
   }
 
-  function isBoundary(line, nextLine = '') {
-    const trimmed = line.trim();
-    if (!trimmed) return true;
-    return (
-      /^#{1,6}\s+/.test(trimmed) ||
-      /^[-*+]\s+/.test(trimmed) ||
-      /^\d+[.)]\s+/.test(trimmed) ||
-      /^>\s?/.test(trimmed) ||
-      parseFenceStart(trimmed) !== null ||
-      isRuleLine(trimmed) ||
-      (trimmed.includes('|') && isTableSeparator(nextLine || ''))
-    );
-  }
+  const introTokens = [];
+  const chapters = [];
+  let activeChapter = null;
+  let subsectionStack = [];
 
-  for (let i = 0; i < lines.length; ) {
-    const rawLine = lines[i];
-    const line = rawLine.trim();
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
 
-    if (!line) {
-      i += 1;
+    if (token.type === 'heading_open' && token.tag === 'h2') {
+      const inline = tokens[i + 1];
+      const headingTitle = normalizeChapterTitle(inline && inline.type === 'inline' ? inline.content : '');
+      const id = token.attrGet('id') || uniqueId('chapter', headingTitle, String(chapters.length + 1));
+
+      const chapter = {
+        title: headingTitle,
+        id,
+        contentTokens: [],
+        subsections: [],
+      };
+
+      chapters.push(chapter);
+      activeChapter = chapter;
+      subsectionStack = [];
+
+      // Skip the h2 open/inline/close tokens; chapter heading is rendered separately.
+      i += 2;
       continue;
     }
 
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      const level = heading[1].length;
-      const text = heading[2].replace(/\s+#+\s*$/, '').trim();
+    if (!activeChapter) {
+      introTokens.push(token);
+      continue;
+    }
 
-      if (level === 2) {
-        const title = normalizeChapterTitle(text);
-        const chapter = {
-          title,
-          id: uniqueId(`chapter-${chapters.length + 1}`, title, String(chapters.length + 1)),
-          blocks: [],
-          subsections: [],
-        };
-        chapters.push(chapter);
-        activeChapter = chapter;
-        subsectionStack = [];
-      } else {
-        const id = uniqueId('section', text, String(i + 1));
-        if (activeChapter && level >= 3) {
-          const subsection = { id, level, title: text, children: [] };
+    activeChapter.contentTokens.push(token);
+
+    if (token.type === 'heading_open') {
+      const level = Number(token.tag.slice(1));
+      if (level >= 3) {
+        const inline = tokens[i + 1];
+        if (inline && inline.type === 'inline') {
+          const id = token.attrGet('id') || uniqueId('section', inline.content || '', String(i + 1));
+          token.attrSet('id', id);
+
+          const subsection = {
+            id,
+            level,
+            title: inline.content,
+            children: [],
+          };
+
           while (subsectionStack.length && subsectionStack[subsectionStack.length - 1].level >= level) {
             subsectionStack.pop();
           }
@@ -300,168 +269,37 @@ function parseMarkdown(markdown) {
           } else {
             activeChapter.subsections.push(subsection);
           }
+
           subsectionStack.push(subsection);
         }
-
-        pushBlock({ type: 'heading', level, text, id });
       }
-
-      i += 1;
-      continue;
     }
-
-    if (isRuleLine(line)) {
-      pushBlock({ type: 'hr' });
-      i += 1;
-      continue;
-    }
-
-    const fence = parseFenceStart(line);
-    if (fence) {
-      const codeLines = [];
-      i += 1;
-      while (i < lines.length && !isFenceEnd(lines[i], fence.marker, fence.length)) {
-        codeLines.push(lines[i]);
-        i += 1;
-      }
-      if (i < lines.length) i += 1;
-      pushBlock({ type: 'code', lang: fence.info, code: codeLines.join('\n') });
-      continue;
-    }
-
-    if (/^[-*+]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^[-*+]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^[-*+]\s+/, ''));
-        i += 1;
-      }
-      pushBlock({ type: 'ul', items });
-      continue;
-    }
-
-    if (/^\d+[.)]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^\d+[.)]\s+/, ''));
-        i += 1;
-      }
-      pushBlock({ type: 'ol', items });
-      continue;
-    }
-
-    if (/^>\s?/.test(line)) {
-      const quoteLines = [];
-      while (i < lines.length && /^>\s?/.test(lines[i].trim())) {
-        quoteLines.push(lines[i].trim().replace(/^>\s?/, ''));
-        i += 1;
-      }
-      pushBlock({ type: 'blockquote', text: quoteLines.join('\n') });
-      continue;
-    }
-
-    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-      const header = parseTableRow(lines[i]);
-      const alignSpec = parseTableRow(lines[i + 1]).map(parseAlignment);
-      i += 2;
-
-      const rows = [];
-      while (i < lines.length && lines[i].trim().includes('|') && lines[i].trim() && !isBoundary(lines[i].trim())) {
-        rows.push(parseTableRow(lines[i]));
-        i += 1;
-      }
-
-      pushBlock({ type: 'table', header, rows, align: alignSpec });
-      continue;
-    }
-
-    const paragraph = [line];
-    i += 1;
-    while (i < lines.length) {
-      const current = lines[i].trim();
-      if (!current) {
-        i += 1;
-        break;
-      }
-      if (isBoundary(current, lines[i + 1] || '')) break;
-      paragraph.push(current);
-      i += 1;
-    }
-
-    pushBlock({ type: 'p', text: paragraph.join(' ') });
   }
 
-  return { introBlocks, chapters };
+  return {
+    introHtml: md.renderer.render(introTokens, md.options, {}).trim(),
+    chapters: chapters.map((chapter) => ({
+      title: chapter.title,
+      id: chapter.id,
+      subsections: chapter.subsections,
+      html: md.renderer.render(chapter.contentTokens, md.options, {}).trim(),
+    })),
+  };
 }
 
-function renderBlock(block) {
-  if (block.type === 'p') {
-    return `<p>${renderInline(block.text)}</p>`;
-  }
-  if (block.type === 'heading') {
-    const level = Math.min(Math.max(block.level, 1), 6);
-    return `<h${level} id="${escapeAttr(block.id)}">${renderInline(block.text)}</h${level}>`;
-  }
-  if (block.type === 'ul') {
-    const items = block.items.map((item) => `<li>${renderInline(item)}</li>`).join('');
-    return `<ul>${items}</ul>`;
-  }
-  if (block.type === 'ol') {
-    const items = block.items.map((item) => `<li>${renderInline(item)}</li>`).join('');
-    return `<ol>${items}</ol>`;
-  }
-  if (block.type === 'blockquote') {
-    const quoteParagraphs = block.text
-      .split(/\n{2,}/)
-      .map((chunk) => chunk.trim())
-      .filter(Boolean)
-      .map((chunk) => `<p>${renderInline(chunk)}</p>`)
-      .join('');
-    return `<blockquote>${quoteParagraphs || `<p>${renderInline(block.text)}</p>`}</blockquote>`;
-  }
-  if (block.type === 'code') {
-    const langClass = block.lang ? ` class="language-${escapeAttr(block.lang)}"` : '';
-    return `<pre><code${langClass}>${escapeHtml(block.code)}</code></pre>`;
-  }
-  if (block.type === 'hr') {
-    return '<hr />';
-  }
-  if (block.type === 'table') {
-    const headerCells = block.header
-      .map((cell, idx) => {
-        const align = block.align[idx] ? ` style="text-align:${block.align[idx]}"` : '';
-        return `<th${align}>${renderInline(cell)}</th>`;
-      })
-      .join('');
-
-    const bodyRows = block.rows
-      .map((row) => {
-        const cells = row
-          .map((cell, idx) => {
-            const align = block.align[idx] ? ` style="text-align:${block.align[idx]}"` : '';
-            return `<td${align}>${renderInline(cell)}</td>`;
-          })
-          .join('');
-        return `<tr>${cells}</tr>`;
-      })
-      .join('');
-
-    return `<table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table>`;
-  }
-  return '';
-}
-
-function buildPostHtml(post, config, markdown) {
-  const parsed = parseMarkdown(markdown);
-  const introHtml = parsed.introBlocks.map(renderBlock).join('\n          ');
+function buildPostHtml(post, config, markdownSource) {
+  const parsed = buildMarkdownStructure(markdownSource);
 
   const chapterHtml = parsed.chapters
     .map((chapter, index) => {
-      const blocksHtml = chapter.blocks.map(renderBlock).join('\n            ');
-      const chapterHeading = post.numberChapters ? `${index + 1}. ${renderInline(chapter.title)}` : renderInline(chapter.title);
+      const chapterHeading = post.numberChapters
+        ? `${index + 1}. ${renderInlineMarkdown(chapter.title)}`
+        : renderInlineMarkdown(chapter.title);
+
       return [
         `          <section id="${escapeAttr(chapter.id)}" class="chapter">`,
         `            <h2>${chapterHeading}</h2>`,
-        blocksHtml ? `            ${blocksHtml}` : '',
+        chapter.html ? `            ${chapter.html}` : '',
         '          </section>',
       ]
         .filter(Boolean)
@@ -476,7 +314,7 @@ function buildPostHtml(post, config, markdown) {
     lines.push(`              <ol class="toc-sub depth-${depth}">`);
     nodes.forEach((node) => {
       lines.push(`                <li class="toc-sub-item level-${Math.min(node.level, 6)}">`);
-      lines.push(`                  <a href="#${escapeAttr(node.id)}">${renderInline(node.title)}</a>`);
+      lines.push(`                  <a href="#${escapeAttr(node.id)}">${renderInlineMarkdown(node.title)}</a>`);
       if (node.children.length) {
         lines.push(renderTocSubsections(node.children, depth + 1));
       }
@@ -491,8 +329,8 @@ function buildPostHtml(post, config, markdown) {
         .map((chapter, index) => {
           const subsections = renderTocSubsections(chapter.subsections, 1);
           const chapterLabel = post.numberChapters
-            ? `${index + 1}. ${renderInline(chapter.title)}`
-            : renderInline(chapter.title);
+            ? `${index + 1}. ${renderInlineMarkdown(chapter.title)}`
+            : renderInlineMarkdown(chapter.title);
 
           return [
             '            <li>',
@@ -565,8 +403,8 @@ ${tocHtml}
           <a class="home-link" href="../../">${escapeHtml(config.siteTitle || 'Home')}</a>
           <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false"></button>
         </div>
-        <h1>${renderInline(post.title)}</h1>
-        <p class="dek">${renderInline(post.description || '')}</p>
+        <h1>${renderInlineMarkdown(post.title)}</h1>
+        <p class="dek">${renderInlineMarkdown(post.description || '')}</p>
         <p class="meta">${escapeHtml(post.prettyDate)}</p>
       </header>
 
@@ -574,7 +412,7 @@ ${tocHtml}
 ${tocAsideHtml}
 
         <article class="essay-content">
-          ${introHtml}
+          ${parsed.introHtml}
 
 ${chapterHtml}
         </article>
@@ -587,23 +425,22 @@ ${chapterHtml}
 `;
 }
 
-async function collectPosts(config) {
+async function collectPosts(config, categoriesConfig) {
   const posts = [];
   const seenUrlPaths = new Set();
 
-  let categoryDirs = [];
-  try {
-    categoryDirs = await fs.readdir(categoriesRoot, { withFileTypes: true });
-  } catch {
-    return posts;
-  }
-
-  for (const categoryDir of categoryDirs) {
-    if (!categoryDir.isDirectory()) continue;
-
-    const categorySlug = categoryDir.name;
+  for (const categoryConfig of categoriesConfig) {
+    const categorySlug = categoryConfig.slug;
     const categoryPath = path.join(categoriesRoot, categorySlug);
-    const postDirs = await fs.readdir(categoryPath, { withFileTypes: true });
+    let postDirs = [];
+    try {
+      postDirs = await fs.readdir(categoryPath, { withFileTypes: true });
+    } catch (error) {
+      if (error && error.code === 'ENOENT') {
+        throw new Error(`Category directory is missing: ${categoryPath}`);
+      }
+      throw error;
+    }
 
     for (const postDir of postDirs) {
       if (!postDir.isDirectory()) continue;
@@ -624,7 +461,6 @@ async function collectPosts(config) {
       const { meta, body } = parseFrontMatter(contentRaw, markdownPath);
       const title = requireString(meta.title, 'title', markdownPath);
       const description = requireString(meta.description, 'description', markdownPath);
-      const category = requireString(meta.category || categorySlug, 'category', markdownPath);
       const date = requireString(meta.date, 'date', markdownPath);
       const numberChapters = parseBooleanFlag(meta.numberChapters, 'numberChapters', markdownPath, false);
       const showContents = parseBooleanFlag(meta.showContents, 'showContents', markdownPath, true);
@@ -638,8 +474,9 @@ async function collectPosts(config) {
         date,
         prettyDate: toPrettyDate(date),
         description,
-        category,
+        category: categoryConfig.name,
         categorySlug,
+        categoryOrder: categoryConfig.order,
         slug,
         urlPath: `${categorySlug}/${slug}/`,
         numberChapters,
@@ -653,6 +490,7 @@ async function collectPosts(config) {
 
       const html = buildPostHtml(post, config, body);
       await fs.mkdir(outputFolder, { recursive: true });
+      await copyPostAttachments(postFolder, outputFolder);
       await writeFileAtomic(htmlPath, html);
 
       posts.push(post);
@@ -671,6 +509,20 @@ async function copyIfExists(source, destination) {
     if (error && error.code === 'ENOENT') return;
     throw error;
   }
+}
+
+async function copyPostAttachments(postFolder, outputFolder) {
+  const entries = await fs.readdir(postFolder, { withFileTypes: true });
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.name === 'content.md' || entry.name === '.DS_Store') return;
+
+      const source = path.join(postFolder, entry.name);
+      const destination = path.join(outputFolder, entry.name);
+      await fs.cp(source, destination, { recursive: true, force: true });
+    })
+  );
 }
 
 async function copyStaticAssets() {
@@ -721,8 +573,9 @@ async function main() {
   await fs.mkdir(buildRoot, { recursive: true });
 
   const config = await readJson(configPath);
+  const categoriesConfig = await readCategoriesConfig();
   await copyStaticAssets();
-  const posts = await collectPosts(config);
+  const posts = await collectPosts(config, categoriesConfig);
 
   await fs.mkdir(contentDir, { recursive: true });
   await writeFileAtomic(outputJson, `${JSON.stringify(posts, null, 2)}\n`);

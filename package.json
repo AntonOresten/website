@@ -1,8 +1,8 @@
 {
-  "name": "minimal-essay-blog",
+  "name": "anton-oresten-site",
   "private": true,
   "version": "1.0.0",
-  "description": "Static minimalist essay blog",
+  "description": "Personal writing website",
   "engines": {
     "node": ">=22"
   },
@@ -11,5 +11,8 @@
     "check": "node --check scripts/build-content.mjs && node --check dev-server.mjs && node --check index.js && node --check theme.js && node --check script.js",
     "dev": "node dev-server.mjs",
     "start": "node dev-server.mjs"
+  },
+  "dependencies": {
+    "markdown-it": "^14.1.0"
   }
 }

@@ -4,14 +4,21 @@
 
   function groupByCategory(posts) {
     return posts.reduce(function (acc, post) {
-      var key = post.category || 'Uncategorized';
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(post);
+      var slug = post.categorySlug || 'uncategorized';
+      if (!acc[slug]) {
+        acc[slug] = {
+          slug: slug,
+          name: post.category || 'Uncategorized',
+          order: Number.isFinite(post.categoryOrder) ? post.categoryOrder : Number.MAX_SAFE_INTEGER,
+          posts: [],
+        };
+      }
+      acc[slug].posts.push(post);
       return acc;
     }, {});
   }
 
-  function createSection(category, posts) {
+  function createSection(category) {
     var section = document.createElement('section');
     section.className = 'home-section';
 
@@ -19,12 +26,12 @@
     headingRow.className = 'home-section-head';
 
     var heading = document.createElement('h2');
-    heading.textContent = category;
+    heading.textContent = category.name;
     headingRow.appendChild(heading);
 
     var count = document.createElement('span');
     count.className = 'home-count';
-    count.textContent = String(posts.length).padStart(2, '0');
+    count.textContent = String(category.posts.length).padStart(2, '0');
     headingRow.appendChild(count);
 
     section.appendChild(headingRow);
@@ -32,7 +39,7 @@
     var list = document.createElement('ul');
     list.className = 'essay-list';
 
-    posts.forEach(function (post) {
+    category.posts.forEach(function (post) {
       var item = document.createElement('li');
       item.className = 'home-entry';
 
@@ -66,7 +73,7 @@
     if (!posts.length) {
       var empty = document.createElement('p');
       empty.className = 'empty-state';
-      empty.textContent = 'No posts found. Add one under categories/<category>/<slug>/ with front matter in content.md.';
+      empty.textContent = 'No posts found. Add one under categories/<category-slug>/<post-slug>/content.md.';
       root.appendChild(empty);
       return;
     }
@@ -74,11 +81,15 @@
     var grouped = groupByCategory(posts);
 
     Object.keys(grouped)
+      .map(function (slug) {
+        return grouped[slug];
+      })
       .sort(function (a, b) {
-        return a.localeCompare(b);
+        if (a.order !== b.order) return a.order - b.order;
+        return a.name.localeCompare(b.name);
       })
       .forEach(function (category) {
-        root.appendChild(createSection(category, grouped[category]));
+        root.appendChild(createSection(category));
       });
   }
 
