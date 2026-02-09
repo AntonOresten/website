@@ -437,7 +437,8 @@ async function collectPosts(config, categoriesConfig) {
       postDirs = await fs.readdir(categoryPath, { withFileTypes: true });
     } catch (error) {
       if (error && error.code === 'ENOENT') {
-        throw new Error(`Category directory is missing: ${categoryPath}`);
+        console.warn(`Warning: category directory not found, skipping "${categorySlug}" (${categoryPath})`);
+        continue;
       }
       throw error;
     }
