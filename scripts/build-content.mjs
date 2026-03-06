@@ -47,6 +47,19 @@ function toRfc822Date(isoDate) {
   return new Date(`${isoDate}T00:00:00Z`).toUTCString();
 }
 
+function parseIsoDate(value, context) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`Invalid date "${value}" in ${context}. Use YYYY-MM-DD.`);
+  }
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Invalid date "${value}" in ${context}.`);
+  }
+
+  return value;
+}
+
 async function readJson(filePath) {
   const raw = await fs.readFile(filePath, 'utf8');
   return JSON.parse(raw);
@@ -84,6 +97,13 @@ async function readCategoriesConfig() {
 function requireString(value, fieldName, filePath) {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`Missing or invalid "${fieldName}" in ${filePath}`);
+  }
+  return value.trim();
+}
+
+function optionalString(value) {
+  if (typeof value !== 'string') {
+    return '';
   }
   return value.trim();
 }
@@ -359,16 +379,25 @@ ${tocHtml}
         </aside>`
     : '';
 
+  const descriptionMeta = post.description
+    ? `
+    <meta
+      name="description"
+      content="${escapeAttr(post.description)}"
+    />`
+    : '';
+  const dekHtml = post.description
+    ? `
+        <p class="dek">${renderInlineMarkdown(post.description)}</p>`
+    : '';
+
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${escapeHtml(post.title)} | ${escapeHtml(config.siteTitle || 'Site')}</title>
-    <meta
-      name="description"
-      content="${escapeAttr(post.description || '')}"
-    />
+${descriptionMeta}
     <meta name="color-scheme" content="light dark" />
     <script>
       (function () {
@@ -404,7 +433,7 @@ ${tocHtml}
           <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false"></button>
         </div>
         <h1>${renderInlineMarkdown(post.title)}</h1>
-        <p class="dek">${renderInlineMarkdown(post.description || '')}</p>
+${dekHtml}
         <p class="meta">${escapeHtml(post.prettyDate)}</p>
       </header>
 
@@ -428,6 +457,9 @@ ${chapterHtml}
 async function collectPosts(config, categoriesConfig) {
   const posts = [];
   const seenUrlPaths = new Set();
+  const buildDate = process.env.CONTENT_BUILD_DATE
+    ? parseIsoDate(process.env.CONTENT_BUILD_DATE, 'CONTENT_BUILD_DATE')
+    : new Date().toISOString().slice(0, 10);
 
   for (const categoryConfig of categoriesConfig) {
     const categorySlug = categoryConfig.slug;
@@ -459,16 +491,37 @@ async function collectPosts(config, categoriesConfig) {
         continue;
       }
 
-      const { meta, body } = parseFrontMatter(contentRaw, markdownPath);
-      const title = requireString(meta.title, 'title', markdownPath);
-      const description = requireString(meta.description, 'description', markdownPath);
-      const date = requireString(meta.date, 'date', markdownPath);
-      const numberChapters = parseBooleanFlag(meta.numberChapters, 'numberChapters', markdownPath, false);
-      const showContents = parseBooleanFlag(meta.showContents, 'showContents', markdownPath, true);
+      const postEntries = await fs.readdir(postFolder, { withFileTypes: true });
+      const scheduledRevisions = postEntries
+        .filter((entry) => entry.isFile())
+        .map((entry) => {
+          const match = /^content\.(\d{4}-\d{2}-\d{2})\.md$/.exec(entry.name);
+          if (!match) return null;
+          const revisionDate = parseIsoDate(match[1], path.join(postFolder, entry.name));
+          return {
+            date: revisionDate,
+            path: path.join(postFolder, entry.name),
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => new Date(`${a.date}T00:00:00Z`) - new Date(`${b.date}T00:00:00Z`));
 
-      if (Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
-        throw new Error(`Invalid date "${date}" in ${markdownPath}`);
+      let appliedRevisionDate = null;
+      let contentSourcePath = markdownPath;
+      for (const revision of scheduledRevisions) {
+        if (revision.date > buildDate) continue;
+        contentRaw = await fs.readFile(revision.path, 'utf8');
+        appliedRevisionDate = revision.date;
+        contentSourcePath = revision.path;
       }
+
+      const { meta, body } = parseFrontMatter(contentRaw, contentSourcePath);
+      const title = requireString(meta.title, 'title', contentSourcePath);
+      const description = optionalString(meta.description);
+      const date = requireString(meta.date, 'date', contentSourcePath);
+      const numberChapters = parseBooleanFlag(meta.numberChapters, 'numberChapters', contentSourcePath, false);
+      const showContents = parseBooleanFlag(meta.showContents, 'showContents', contentSourcePath, false);
+      parseIsoDate(date, contentSourcePath);
 
       const post = {
         title,
@@ -482,6 +535,7 @@ async function collectPosts(config, categoriesConfig) {
         urlPath: `${categorySlug}/${slug}/`,
         numberChapters,
         showContents,
+        appliedRevisionDate,
       };
 
       if (seenUrlPaths.has(post.urlPath)) {
@@ -517,7 +571,9 @@ async function copyPostAttachments(postFolder, outputFolder) {
 
   await Promise.all(
     entries.map(async (entry) => {
-      if (entry.name === 'content.md' || entry.name === '.DS_Store') return;
+      if (entry.name === '.DS_Store') return;
+      if (entry.name === 'content.md') return;
+      if (/^content\.\d{4}-\d{2}-\d{2}\.md$/.test(entry.name)) return;
 
       const source = path.join(postFolder, entry.name);
       const destination = path.join(outputFolder, entry.name);

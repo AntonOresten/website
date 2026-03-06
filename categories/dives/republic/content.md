@@ -2,7 +2,6 @@
 title: Republic.jl
 description: On Julia's `public` keyword
 date: 2026-02-23
-showContents: false
 ---
 
 Julia 1.11 introduced the `public` keyword. It was a good idea — a way to say "this name is part of the API, but I don't want it dumped into your namespace when you write `using MyPackage`." Exported names get pulled in automatically; public names are accessible only through qualified access like `MyPackage.frobnicate`. Clean separation of API surface from namespace pollution.

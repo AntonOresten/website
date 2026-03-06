@@ -48,17 +48,18 @@
       link.href = post.urlPath;
       link.textContent = post.title;
 
-      var description = document.createElement('p');
-      description.className = 'home-entry-dek';
-      description.textContent = post.description || '';
-
       var time = document.createElement('time');
       time.className = 'home-entry-date';
       time.dateTime = post.date;
       time.textContent = post.prettyDate || post.date;
 
       item.appendChild(link);
-      item.appendChild(description);
+      if (post.description) {
+        var description = document.createElement('p');
+        description.className = 'home-entry-dek';
+        description.textContent = post.description;
+        item.appendChild(description);
+      }
       item.appendChild(time);
       list.appendChild(item);
     });

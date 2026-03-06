@@ -2,7 +2,6 @@
 title: '"That is just blogslop, your honor"'
 description: How does one balance pretense with presence and sincerity?
 date: 2026-02-08
-showContents: false
 ---
 
 The second episode of Futurama is called "The Series Has Landed". It has a double meaning—the crew lands on the Moon, and the show itself has landed. It exists now; it's here. The pilot did its job. Now what?

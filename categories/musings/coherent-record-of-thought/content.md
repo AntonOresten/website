@@ -2,7 +2,6 @@
 title: Coherent Record of Thought
 description: A chance for manifold musings to manifest
 date: 2026-02-07
-showContents: false
 ---
 
 An idea is literally not part of our world until we learn of it. It can affect us externally, but until the moment of contact, it isn't part of our world model. We constantly enter new worlds as new ideas find us. From then on, they live in our heads, occasionally surface in a conversation, but sometimes they dissolve. They become part of us without ever becoming part of anything else, but there is no record of it ever having been part of anything.
