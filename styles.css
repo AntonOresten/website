@@ -216,8 +216,7 @@ body::after {
 }
 
 .home-section {
-  border-top: 1px solid var(--rule);
-  padding-top: 1.1rem;
+  padding-top: 0.2rem;
 }
 
 .home-section-head {
@@ -225,29 +224,24 @@ body::after {
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
-  margin: 0 0 0.95rem;
+  margin: 0 0 0.8rem;
 }
 
 .home-section h2 {
   margin: 0;
   font-family: var(--serif);
-  font-size: 1.22rem;
+  font-size: 1.7rem;
   font-weight: 600;
   letter-spacing: 0;
-  color: var(--muted);
-}
-
-.home-count {
-  font-family: var(--sans);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+  color: var(--heading-copy);
 }
 
 .essay-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  border-top: 2px solid var(--rule);
+  border-bottom: 2px solid var(--rule);
 }
 
 .home-entry {
@@ -257,8 +251,8 @@ body::after {
   border-top: 1px solid var(--rule);
 }
 
-.essay-list li:last-child {
-  border-bottom: 1px solid var(--rule);
+.essay-list li:first-child {
+  border-top: 0;
 }
 
 .home-entry-title {
