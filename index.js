@@ -29,11 +29,6 @@
     heading.textContent = category.name;
     headingRow.appendChild(heading);
 
-    var count = document.createElement('span');
-    count.className = 'home-count';
-    count.textContent = String(category.posts.length).padStart(2, '0');
-    headingRow.appendChild(count);
-
     section.appendChild(headingRow);
 
     var list = document.createElement('ul');
