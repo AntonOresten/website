@@ -1,6 +1,5 @@
 {
   "categories": [
-    { "slug": "musings", "name": "Musings" },
-    { "slug": "dives", "name": "Dives" }
+    { "slug": "musings", "name": "Musings" }
   ]
 }
